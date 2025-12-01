@@ -68,6 +68,22 @@ async function getPlansForDate(serviceTypeId, targetDate) {
   return plans[0];
 }
 
+async function getPlansForWeekRange(serviceTypeId, mondayDate, sundayDate) {
+  const start = startOfDay(mondayDate);
+  const end = endOfDay(sundayDate);
+
+  const after = formatISO(start);
+  const before = formatISO(end);
+
+  const data = await requestWithRetry(
+    `/service_types/${serviceTypeId}/plans?filter=after,before&after=${encodeURIComponent(
+      after
+    )}&before=${encodeURIComponent(before)}`
+  );
+
+  return data.data || [];
+}
+
 async function getAllTeamMembersPages(initialUrl) {
   let url = initialUrl;
   const all = [];
@@ -97,48 +113,86 @@ async function getAllTeamMembersPages(initialUrl) {
   return all;
 }
 
-function normalizeTeamMember(raw, includedIndex) {
+async function getPlanTimes(serviceTypeId, planId) {
+  const url = `/service_types/${serviceTypeId}/plans/${planId}/times`;
+  try {
+    const data = await requestWithRetry(url);
+    const times = data.data || [];
+
+    const index = {};
+    for (const t of times) {
+      if (!t.id) continue;
+      index[t.id] = t;
+    }
+    return index;
+  } catch (err) {
+    const status = err.response && err.response.status;
+    if (status === 404) {
+      // Some accounts/plans may not expose times via this endpoint; fall back to TBD.
+      return {};
+    }
+    throw err;
+  }
+}
+
+function normalizeTeamMember(raw, includedIndex, planTimesIndex) {
   const attrs = raw.attributes || {};
   const rels = raw.relationships || {};
 
   const personId = rels.person && rels.person.data && rels.person.data.id;
   const teamId = rels.team && rels.team.data && rels.team.data.id;
-  const positionId =
-    rels.position && rels.position.data && rels.position.data.id;
+  
+  // Get PlanTime ID from times or service_times relationship
+  const timesArray = rels.times && rels.times.data ? rels.times.data : 
+                     (rels.service_times && rels.service_times.data ? rels.service_times.data : []);
+  const planTimeId = timesArray.length > 0 ? timesArray[0].id : null;
 
   const person =
     (personId && includedIndex[`Person:${personId}`]) || {};
   const team = (teamId && includedIndex[`Team:${teamId}`]) || {};
-  const position =
-    (positionId && includedIndex[`Position:${positionId}`]) || {};
+  
+  // Get PlanTime from included resources OR from planTimesIndex (fetched separately)
+  let planTime = null;
+  if (planTimeId) {
+    planTime = includedIndex[`PlanTime:${planTimeId}`] || 
+               (planTimesIndex && planTimesIndex[planTimeId]) || 
+               null;
+  }
 
-  // Service time may not be directly on team_member; fall back to plan time if needed.
-  const timeAttr =
-    attrs.starts_at ||
-    attrs.start_time ||
-    person.starts_at ||
-    null;
+  // Extract time from PlanTime attributes
+  let timeAttr = null;
+  if (planTime && planTime.attributes) {
+    timeAttr = planTime.attributes.starts_at || 
+               planTime.attributes.time || 
+               null;
+  }
+
+  // Map status codes: "C" = confirmed, "D" = declined, etc.
+  let status = attrs.status || 'unknown';
+  if (status === 'C') status = 'confirmed';
+  else if (status === 'D') status = 'declined';
+  else if (status === 'P' || status === 'U') status = 'pending';
 
   return {
     id: raw.id,
-    status: attrs.status || 'unknown',
-    personName:
-      (person.attributes && person.attributes.name) ||
-      (person.attributes &&
-        `${person.attributes.first_name} ${person.attributes.last_name}`) ||
-      'Unknown Person',
+    status: status,
+    personName: attrs.name || 
+                (person.attributes && person.attributes.name) ||
+                (person.attributes &&
+                  `${person.attributes.first_name || ''} ${person.attributes.last_name || ''}`.trim()) ||
+                'Unknown Person',
     teamName:
       (team.attributes && team.attributes.name) || 'Unknown Team',
     positionName:
-      (position.attributes && position.attributes.name) ||
-      attrs.title ||
+      attrs.team_position_name || // This is the correct field!
       'Unknown Position',
     rawStartTime: timeAttr,
   };
 }
 
 async function getTeamMembersForPlan(serviceTypeId, planId, teamNamesFilter) {
-  const url = `/service_types/${serviceTypeId}/plans/${planId}/team_members?include=person,team,position`;
+  // Try including plan_times - if that doesn't work, we'll fetch them separately
+  const url = `/service_types/${serviceTypeId}/plans/${planId}/team_members?include=person,team,times,plan_times`;
   const firstPage = await requestWithRetry(url);
 
   const allData = [...(firstPage.data || [])];
@@ -162,14 +216,67 @@ async function getTeamMembersForPlan(serviceTypeId, planId, teamNamesFilter) {
     const key = `${capitalizeType(inc.type)}:${inc.id}`;
     includedIndex[key] = inc;
   }
+  
+  // Collect all unique PlanTime IDs from team member relationships
+  const planTimeIds = new Set();
+  for (const member of allData) {
+    const rels = member.relationships || {};
+    const times = rels.times?.data || rels.service_times?.data || [];
+    times.forEach(t => planTimeIds.add(t.id));
+  }
+  
+  // Fetch PlanTime resources if not already in included resources
+  const includedTypes = [...new Set(included.map(inc => inc.type))];
+  const planTimesIndex = {};
+  if (planTimeIds.size > 0 && !includedTypes.includes('PlanTime')) {
+    // Try fetching all times for the plan and match by ID
+    try {
+      const allTimesUrl = `/service_types/${serviceTypeId}/plans/${planId}/plan_times`;
+      const allTimesData = await requestWithRetry(allTimesUrl);
+      if (allTimesData.data && Array.isArray(allTimesData.data)) {
+        for (const time of allTimesData.data) {
+          if (time.id && planTimeIds.has(time.id)) {
+            planTimesIndex[time.id] = time;
+          }
+        }
+      }
+    } catch (err) {
+      // Try alternative endpoint if plan_times doesn't work
+      try {
+        const altUrl = `/service_types/${serviceTypeId}/plans/${planId}/times`;
+        const altData = await requestWithRetry(altUrl);
+        if (altData.data && Array.isArray(altData.data)) {
+          for (const time of altData.data) {
+            if (time.id && planTimeIds.has(time.id)) {
+              planTimesIndex[time.id] = time;
+            }
+          }
+        }
+      } catch (err2) {
+        // If both endpoints fail, planTimesIndex will remain empty and times will show as TBD
+      }
+    }
+  } else {
+    // Use included PlanTime resources if available
+    for (const inc of included) {
+      if (inc.type === 'PlanTime' && inc.id) {
+        planTimesIndex[inc.id] = inc;
+      }
+    }
+  }
 
   const normalized = allData.map((item) =>
-    normalizeTeamMember(item, includedIndex)
+    normalizeTeamMember(item, includedIndex, planTimesIndex)
   );
 
-  const filtered = normalized.filter((m) =>
-    teamNamesFilter.includes(m.teamName)
+  const loweredFilters = (teamNamesFilter || []).map((t) =>
+    String(t || '').toLowerCase()
   );
+
+  const filtered = normalized.filter((m) => {
+    const name = String(m.teamName || '').toLowerCase();
+    return loweredFilters.some((t) => t && name.includes(t));
+  });
 
   return filtered;
 }
@@ -182,6 +289,7 @@ function capitalizeType(type) {
 module.exports = {
   getServiceTypes,
   getPlansForDate,
+  getPlansForWeekRange,
   getTeamMembersForPlan,
 };
 

@@ -30,6 +30,16 @@ module.exports = {
   },
   teams: {
     names: TEAM_NAMES,
+    signUpUrls: {
+      // Auto-generate default sign-up URL from service type ID
+      // Pattern: https://services.planningcenteronline.com/ministries/{service_type_id}/signup_sheet
+      defaultSignUpUrl: `https://services.planningcenteronline.com/ministries/${requireEnv('PCO_SERVICE_TYPE_ID')}/signup_sheet`,
+      // Allow override via environment variables
+      'medical': process.env.MEDICAL_SIGNUP_URL || '',
+      'medical response': process.env.MEDICAL_SIGNUP_URL || '',
+      'security': process.env.SECURITY_SIGNUP_URL || '',
+      'security response': process.env.SECURITY_SIGNUP_URL || '',
+    },
   },
   flags: {
     dryRun: String(process.env.DRY_RUN || '').toLowerCase() === 'true',
