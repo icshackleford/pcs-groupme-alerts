@@ -1,6 +1,7 @@
 const axios = require('axios');
 const config = require('./config');
-const { formatDisplayDate } = require('./utils.date');
+const { formatDisplayDate, formatServiceTime } = require('./utils.date');
+const { format } = require('date-fns');
 
 const groupMeClient = axios.create({
   baseURL: config.groupMe.baseUrl,
@@ -78,6 +79,13 @@ function formatScheduleMessage(members, targetDate, formatTimeFn, neededPosition
     lines.push(line);
   }
 
+  // Add greeting at the beginning with date included
+  if (targetDate instanceof Date && !Number.isNaN(targetDate.getTime())) {
+    const dateHeader = formatDisplayDate(targetDate);
+    pushLine(`Here is your ${dateHeader} rundown. Here is who is on deck:`);
+    pushLine(''); // Blank line after greeting
+  }
+
   // Only show dates that have assignments (skip empty days)
   const datesToShow = Object.keys(byDate).sort();
   
@@ -90,16 +98,6 @@ function formatScheduleMessage(members, targetDate, formatTimeFn, neededPosition
       continue;
     }
     
-    // Format the date header with plain text (GroupMe will handle formatting)
-    if (dateKey === 'TBD') {
-      pushLine(`🗓️ TBD Dates`);
-    } else {
-      const dateObj = new Date(dateKey + 'T00:00:00');
-      const dateHeader = formatDisplayDate(dateObj);
-      pushLine(`🗓️ ${dateHeader}`);
-    }
-    pushLine(''); // Blank line after date header
-
     // Group by team for this date
     const medicalTeam = [];
     const securityTeam = [];
@@ -199,7 +197,7 @@ function formatScheduleMessage(members, targetDate, formatTimeFn, neededPosition
     }
     
     if (medicalConfirmed.length > 0 || Object.keys(medicalOpenByTime).length > 0) {
-      pushLine('🏥 MEDICAL RESPONSE TEAM:');
+      pushLine('⚕️ Medical Team:');
       
       // Combine all members and open positions, sort by time
       const allMedical = [
@@ -298,7 +296,7 @@ function formatScheduleMessage(members, targetDate, formatTimeFn, neededPosition
     }
     
     if (securityConfirmed.length > 0 || Object.keys(securityOpenByTime).length > 0) {
-      pushLine('👮 SECURITY RESPONSE TEAM:');
+      pushLine('🛡️ Security Team:');
       
       // Combine all members and open positions, sort by time
       const allSecurity = [
