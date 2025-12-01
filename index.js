@@ -3,6 +3,7 @@ const config = require('./config');
 const {
   getPlansForWeekRange,
   getTeamMembersForPlan,
+  getNeededPositions,
 } = require('./services.planningCenter');
 const { postMessage, formatScheduleMessage } = require('./services.groupMe');
 const cron = require('node-cron');
@@ -29,8 +30,9 @@ async function runOnce() {
 
     console.log(`Found ${plans.length} plan(s) for tomorrow:`, plans.map(p => `${p.id} (${p.attributes && p.attributes.dates})`).join(', '));
 
-    // Fetch team members from all plans for tomorrow
+    // Fetch team members and needed positions from all plans for tomorrow
     const allTeamMembers = [];
+    const allNeededPositions = [];
     for (const plan of plans) {
       const teamMembers = await getTeamMembersForPlan(
         config.planningCenter.serviceTypeId,
@@ -40,10 +42,19 @@ async function runOnce() {
       if (teamMembers && teamMembers.length > 0) {
         allTeamMembers.push(...teamMembers);
       }
+      
+      // Fetch needed positions for this plan
+      const neededPositions = await getNeededPositions(
+        config.planningCenter.serviceTypeId,
+        plan.id
+      );
+      if (neededPositions && neededPositions.length > 0) {
+        allNeededPositions.push(...neededPositions);
+      }
     }
 
-    if (allTeamMembers.length === 0) {
-      console.log('No Security/Medical team members found for tomorrow.');
+    if (allTeamMembers.length === 0 && allNeededPositions.length === 0) {
+      console.log('No Security/Medical team members or needed positions found for tomorrow.');
       // Don't post if there are no team members - just log
       return;
     }
@@ -63,10 +74,26 @@ async function runOnce() {
       };
     });
 
+    // Normalize needed positions with service times
+    const normalizedNeededPositions = allNeededPositions.map((np) => {
+      let serviceTime = null;
+      if (np.rawStartTime) {
+        const parsed = new Date(np.rawStartTime);
+        if (!Number.isNaN(parsed.getTime())) {
+          serviceTime = parsed;
+        }
+      }
+      return {
+        ...np,
+        serviceTime,
+      };
+    });
+
     const text = formatScheduleMessage(
       normalizedForFormatting,
       tomorrow,
-      formatServiceTime
+      formatServiceTime,
+      normalizedNeededPositions
     );
 
     console.log('Formatted message:\n', text);

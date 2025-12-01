@@ -265,9 +265,31 @@ async function getTeamMembersForPlan(serviceTypeId, planId, teamNamesFilter) {
     }
   }
 
-  const normalized = allData.map((item) =>
-    normalizeTeamMember(item, includedIndex, planTimesIndex)
-  );
+  // Normalize team members - if a member has multiple times, create separate records for each
+  const normalized = [];
+  for (const item of allData) {
+    const rels = item.relationships || {};
+    const timesArray = rels.times?.data || rels.service_times?.data || [];
+    
+    if (timesArray.length === 0) {
+      // No times - create one record
+      normalized.push(normalizeTeamMember(item, includedIndex, planTimesIndex));
+    } else {
+      // Multiple times - create a separate record for each time
+      for (const timeRef of timesArray) {
+        // Create a modified item with only this time
+        const modifiedItem = {
+          ...item,
+          relationships: {
+            ...item.relationships,
+            times: { data: [timeRef] },
+            service_times: { data: [timeRef] },
+          },
+        };
+        normalized.push(normalizeTeamMember(modifiedItem, includedIndex, planTimesIndex));
+      }
+    }
+  }
 
   const loweredFilters = (teamNamesFilter || []).map((t) =>
     String(t || '').toLowerCase()
@@ -281,6 +303,61 @@ async function getTeamMembersForPlan(serviceTypeId, planId, teamNamesFilter) {
   return filtered;
 }
 
+async function getNeededPositions(serviceTypeId, planId) {
+  // Fetch needed positions for a plan
+  const url = `/service_types/${serviceTypeId}/plans/${planId}/needed_positions?include=team,time`;
+  try {
+    const data = await requestWithRetry(url);
+    const neededPositions = data.data || [];
+    const included = data.included || [];
+    
+    // Build index for included resources (teams and times)
+    const includedIndex = {};
+    for (const inc of included) {
+      if (!inc.type || !inc.id) continue;
+      const key = `${capitalizeType(inc.type)}:${inc.id}`;
+      includedIndex[key] = inc;
+    }
+    
+    // Normalize needed positions
+    return neededPositions.map(np => {
+      const attrs = np.attributes || {};
+      const rels = np.relationships || {};
+      
+      const teamId = rels.team?.data?.id;
+      const timeId = rels.time?.data?.id;
+      
+      const team = teamId ? includedIndex[`Team:${teamId}`] : null;
+      const planTime = timeId ? includedIndex[`PlanTime:${timeId}`] : null;
+      
+      // Extract time from PlanTime
+      let timeAttr = null;
+      if (planTime && planTime.attributes) {
+        timeAttr = planTime.attributes.starts_at || 
+                   planTime.attributes.time || 
+                   null;
+      }
+      
+      return {
+        id: np.id,
+        quantity: attrs.quantity || 1,
+        teamPositionName: attrs.team_position_name || 'Unknown Position',
+        teamName: (team?.attributes?.name) || 'Unknown Team',
+        teamId: teamId,
+        planTimeId: timeId,
+        rawStartTime: timeAttr,
+      };
+    });
+  } catch (err) {
+    const status = err.response && err.response.status;
+    if (status === 404) {
+      // Some plans may not have needed positions endpoint
+      return [];
+    }
+    throw err;
+  }
+}
+
 function capitalizeType(type) {
   if (!type) return '';
   return type.charAt(0).toUpperCase() + type.slice(1);
@@ -291,6 +368,7 @@ module.exports = {
   getPlansForDate,
   getPlansForWeekRange,
   getTeamMembersForPlan,
+  getNeededPositions,
 };
 
 
