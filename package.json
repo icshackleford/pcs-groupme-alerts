@@ -1,0 +1,30 @@
+{
+  "name": "pcs-groupme-alerts",
+  "version": "1.0.0",
+  "description": "Planning Center Services to GroupMe integration bot for Security and Medical team schedules",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "run-once": "node index.js --once",
+    "test-run": "node test-run.js"
+  },
+  "keywords": [
+    "planning-center",
+    "groupme",
+    "bot",
+    "scheduling"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "axios": "^1.13.2",
+    "date-fns": "^4.1.0",
+    "dotenv": "^17.2.3",
+    "node-cron": "^4.2.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.11"
+  }
+}
