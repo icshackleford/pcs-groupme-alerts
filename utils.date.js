@@ -22,7 +22,7 @@ function getWeekRange(sundayDate) {
     monday,
     sunday,
     allDates: weekDates,
-    dateKeys: weekDates.map(d => d.toISOString().split('T')[0]) // YYYY-MM-DD format
+    dateKeys: weekDates.map(d => format(startOfDay(d), 'yyyy-MM-dd')) // YYYY-MM-DD format using local date
   };
 }
 

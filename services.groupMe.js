@@ -1,7 +1,7 @@
 const axios = require('axios');
 const config = require('./config');
 const { formatDisplayDate, formatServiceTime } = require('./utils.date');
-const { format } = require('date-fns');
+const { format, startOfDay } = require('date-fns');
 
 const groupMeClient = axios.create({
   baseURL: config.groupMe.baseUrl,
@@ -22,15 +22,15 @@ function getSundayDateKey(serviceTime) {
   const date = new Date(serviceTime);
   if (isNaN(date.getTime())) return null;
   
-  // Get the date at midnight to use as a key
-  const dateKey = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  return dateKey.toISOString().split('T')[0]; // YYYY-MM-DD format
+  // Get the date at midnight local time and format as local date string (YYYY-MM-DD)
+  const localDate = startOfDay(date);
+  return format(localDate, 'yyyy-MM-dd');
 }
 
 function formatScheduleMessage(members, targetDate, formatTimeFn, neededPositions = []) {
-  // Get the target date key (YYYY-MM-DD format)
+  // Get the target date key (YYYY-MM-DD format) using local date
   const targetDateKey = targetDate instanceof Date && !Number.isNaN(targetDate.getTime())
-    ? targetDate.toISOString().split('T')[0]
+    ? format(startOfDay(targetDate), 'yyyy-MM-dd')
     : null;
   
   // Group members by date, filtering to only include the target date
@@ -67,7 +67,7 @@ function formatScheduleMessage(members, targetDate, formatTimeFn, neededPosition
     if (!neededByDate[dateKey]) neededByDate[dateKey] = [];
     neededByDate[dateKey].push(np);
     
-    // Create lookup key: team name + time
+    // Create lookup key: team name + time (using ISO string for time comparison)
     const timeKey = np.serviceTime ? np.serviceTime.toISOString() : 'TBD';
     const lookupKey = `${dateKey}|${np.teamName}|${timeKey}`;
     neededLookup[lookupKey] = (neededLookup[lookupKey] || 0) + (np.quantity || 1);

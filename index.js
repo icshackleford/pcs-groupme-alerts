@@ -1,5 +1,5 @@
 const { getTomorrow, formatDisplayDate, formatServiceTime } = require('./utils.date');
-const { addDays, subHours, differenceInHours } = require('date-fns');
+const { addDays, subHours, differenceInHours, format, startOfDay } = require('date-fns');
 const config = require('./config');
 const {
   getPlansForWeekRange,
@@ -14,7 +14,7 @@ const postedEvents = new Set();
 
 function getEventKey(planId, serviceTime) {
   if (!serviceTime) return `plan-${planId}`;
-  const dateKey = serviceTime.toISOString().split('T')[0]; // YYYY-MM-DD
+  const dateKey = format(startOfDay(serviceTime), 'yyyy-MM-dd');
   return `${planId}-${dateKey}`;
 }
 
@@ -101,10 +101,10 @@ async function runOnce() {
       return;
     }
 
-    // Group events by date (YYYY-MM-DD)
+    // Group events by date (YYYY-MM-DD) using local date
     const eventsByDate = {};
     for (const event of upcomingEvents) {
-      const dateKey = event.earliestTime.toISOString().split('T')[0];
+      const dateKey = format(startOfDay(event.earliestTime), 'yyyy-MM-dd');
       if (!eventsByDate[dateKey]) {
         eventsByDate[dateKey] = [];
       }
@@ -139,8 +139,8 @@ async function runOnce() {
       if (hoursUntilPost >= 0 && hoursUntilPost < 1) {
         console.log(`Posting schedule for events on ${formatDisplayDate(earliestTimeForDate)} (24 hours before first service at ${formatServiceTime(earliestTimeForDate)})`);
         
-        // Get the date of the event
-        const eventDate = new Date(earliestTimeForDate.getFullYear(), earliestTimeForDate.getMonth(), earliestTimeForDate.getDate());
+        // Get the date of the event at midnight local time
+        const eventDate = startOfDay(earliestTimeForDate);
         
         // Combine all team members and needed positions from all events on this date
         const allTeamMembers = [];
