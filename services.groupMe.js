@@ -185,6 +185,7 @@ function formatScheduleMessage(members, targetDate, formatTimeFn, neededPosition
     }
     
     // Calculate open positions needed: needed - confirmed
+    // NOTE: medicalConfirmed includes both confirmed AND pending (filters out only declined)
     // ONLY use needed positions from Planning Center - don't infer from declined assignments
     const medicalOpenByTime = {};
     for (const timeKey in medicalNeededByTime) {
@@ -284,6 +285,7 @@ function formatScheduleMessage(members, targetDate, formatTimeFn, neededPosition
     }
     
     // Calculate open positions needed: needed - confirmed
+    // NOTE: securityConfirmed includes both confirmed AND pending (filters out only declined)
     // ONLY use needed positions from Planning Center - don't infer from declined assignments
     const securityOpenByTime = {};
     for (const timeKey in securityNeededByTime) {

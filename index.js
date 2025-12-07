@@ -1,5 +1,6 @@
 const { getTomorrow, formatDisplayDate, formatServiceTime } = require('./utils.date');
 const { addDays, subHours, differenceInHours, format, startOfDay } = require('date-fns');
+const { toZonedTime, fromZonedTime } = require('date-fns-tz');
 const config = require('./config');
 const {
   getPlansForWeekRange,
@@ -8,6 +9,9 @@ const {
 } = require('./services.planningCenter');
 const { postMessage, formatScheduleMessage } = require('./services.groupMe');
 const cron = require('node-cron');
+
+// Eastern timezone for all timing calculations
+const EASTERN_TZ = 'America/New_York';
 
 // Track which events we've already posted for (to avoid duplicate posts)
 const postedEvents = new Set();
@@ -93,7 +97,9 @@ async function findUpcomingEvents() {
 async function runOnce() {
   console.log('Running Planning Center → GroupMe bot check...');
   try {
-    const now = new Date();
+    // Convert current time to Eastern timezone for all calculations
+    const nowUTC = new Date();
+    const now = toZonedTime(nowUTC, EASTERN_TZ); // Convert to Eastern time
     const upcomingEvents = await findUpcomingEvents();
 
     if (upcomingEvents.length === 0) {
@@ -130,10 +136,14 @@ async function runOnce() {
         continue;
       }
 
-      // Calculate 24 hours before the first service time for this date
-      const postTime = subHours(earliestTimeForDate, 24);
+      // Convert earliestTimeForDate to Eastern timezone for calculation
+      const earliestTimeEastern = toZonedTime(earliestTimeForDate, EASTERN_TZ);
+      
+      // Calculate 24 hours before the first service time for this date (in Eastern time)
+      const postTime = subHours(earliestTimeEastern, 24);
       
       // Check if we're within 1 hour of the post time (to account for hourly cron)
+      // Both times are now in Eastern timezone
       const hoursUntilPost = differenceInHours(postTime, now);
       
       if (hoursUntilPost >= 0 && hoursUntilPost < 1) {
@@ -141,14 +151,41 @@ async function runOnce() {
         
         // Get the date of the event at midnight local time
         const eventDate = startOfDay(earliestTimeForDate);
+        const eventDateKey = format(eventDate, 'yyyy-MM-dd');
         
         // Combine all team members and needed positions from all events on this date
+        // Filter to only include those that match the target date
         const allTeamMembers = [];
         const allNeededPositions = [];
         
         for (const event of dateEvents) {
-          allTeamMembers.push(...event.teamMembers);
-          allNeededPositions.push(...event.neededPositions);
+          // Filter team members to only those for the target date
+          for (const member of event.teamMembers) {
+            if (member.rawStartTime) {
+              const serviceTime = new Date(member.rawStartTime);
+              if (!Number.isNaN(serviceTime.getTime())) {
+                const memberDate = startOfDay(serviceTime);
+                const memberDateKey = format(memberDate, 'yyyy-MM-dd');
+                if (memberDateKey === eventDateKey) {
+                  allTeamMembers.push(member);
+                }
+              }
+            }
+          }
+          
+          // Filter needed positions to only those for the target date
+          for (const np of event.neededPositions) {
+            if (np.rawStartTime) {
+              const serviceTime = new Date(np.rawStartTime);
+              if (!Number.isNaN(serviceTime.getTime())) {
+                const npDate = startOfDay(serviceTime);
+                const npDateKey = format(npDate, 'yyyy-MM-dd');
+                if (npDateKey === eventDateKey) {
+                  allNeededPositions.push(np);
+                }
+              }
+            }
+          }
         }
 
         // Convert rawStartTime strings to Date instances

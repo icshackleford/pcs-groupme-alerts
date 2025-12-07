@@ -1,4 +1,5 @@
 const { addDays, format, nextSunday, isSunday, startOfDay, getDay } = require('date-fns');
+const { formatInTimeZone } = require('date-fns-tz');
 
 function getNextSunday(fromDate = new Date()) {
   const today = startOfDay(fromDate);
@@ -36,7 +37,9 @@ function getTomorrow(fromDate = new Date()) {
 }
 
 function formatServiceTime(date) {
-  return format(date, 'h:mm a');
+  // Explicitly format in EST/EDT timezone (America/New_York)
+  // This ensures consistent time display regardless of server timezone
+  return formatInTimeZone(date, 'America/New_York', 'h:mm a');
 }
 
 module.exports = {

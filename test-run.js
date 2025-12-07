@@ -3,6 +3,7 @@ const config = require('./config');
 const {
   getPlansForWeekRange,
   getTeamMembersForPlan,
+  getNeededPositions,
 } = require('./services.planningCenter');
 const { postMessage, formatScheduleMessage } = require('./services.groupMe');
 
@@ -34,8 +35,9 @@ async function testForSunday() {
 
     console.log(`Found ${plans.length} plan(s) for Sunday:`, plans.map(p => `${p.id} (${p.attributes && p.attributes.dates})`).join(', '));
 
-    // Fetch team members from all plans for Sunday
+    // Fetch team members and needed positions from all plans for Sunday
     const allTeamMembers = [];
+    const allNeededPositions = [];
     for (const plan of plans) {
       const teamMembers = await getTeamMembersForPlan(
         config.planningCenter.serviceTypeId,
@@ -44,6 +46,14 @@ async function testForSunday() {
       );
       if (teamMembers && teamMembers.length > 0) {
         allTeamMembers.push(...teamMembers);
+      }
+      
+      const neededPositions = await getNeededPositions(
+        config.planningCenter.serviceTypeId,
+        plan.id
+      );
+      if (neededPositions && neededPositions.length > 0) {
+        allNeededPositions.push(...neededPositions);
       }
     }
 
@@ -67,10 +77,26 @@ async function testForSunday() {
       };
     });
 
+    // Normalize needed positions with service times
+    const normalizedNeededPositions = allNeededPositions.map((np) => {
+      let serviceTime = null;
+      if (np.rawStartTime) {
+        const parsed = new Date(np.rawStartTime);
+        if (!Number.isNaN(parsed.getTime())) {
+          serviceTime = parsed;
+        }
+      }
+      return {
+        ...np,
+        serviceTime,
+      };
+    });
+
     const text = formatScheduleMessage(
       normalizedForFormatting,
       tomorrow,
-      formatServiceTime
+      formatServiceTime,
+      normalizedNeededPositions
     );
 
     console.log('\nFormatted message:\n', text);
